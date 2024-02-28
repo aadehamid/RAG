@@ -1,6 +1,7 @@
 chromadb/*
 .idea/
 .env
+.DS_Store
 data/pdfs/
 .venv/
 # Byte-compiled / optimized / DLL files
