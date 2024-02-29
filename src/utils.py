@@ -28,6 +28,8 @@ from llama_index.core.extractors import (TitleExtractor,
                                          SummaryExtractor, KeywordExtractor)
 from llama_index.extractors.entity import EntityExtractor
 
+import openai
+openai.api_key = os.getenv("OPENA_AI_KEY")
 # =============================================================================
 # create
 # %%
@@ -48,7 +50,7 @@ Settings.text_splitter = text_splitter
 # %%
 # =============================================================================
 # Load data
-def data_loader(filepath: str, parse: bool = False) -> List[Document]:
+async def data_loader(filepath: str, parse: bool = False) -> List[Document]:
     """
     Loads and parses a PDF file using LlamaParse.
 
@@ -70,10 +72,10 @@ def data_loader(filepath: str, parse: bool = False) -> List[Document]:
             api_key=os.getenv("LLAMA_PARSER_API_KEY"),
             result_type="markdown",
             verbose=True, )
-
-        file_extractor = {".pdf": parser}
-        docs = SimpleDirectoryReader(
-            filepath, file_extractor=file_extractor).load_data()
+        docs = await parser.aload_data(filepath)
+        # file_extractor = {".pdf": parser}
+        # docs = SimpleDirectoryReader(
+        #     filepath, file_extractor=file_extractor).load_data()
     else:
         docs = SimpleDirectoryReader(filepath).load_data()
 
