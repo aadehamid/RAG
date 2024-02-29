@@ -50,7 +50,7 @@ Settings.text_splitter = text_splitter
 # %%
 # =============================================================================
 # Load data
-async def data_loader(filepath: str, parse: bool = False) -> List[Document]:
+async def pdf_data_loader(filepath: str, parse: bool = False) -> List[Document]:
     """
     Loads and parses a PDF file using LlamaParse.
 
