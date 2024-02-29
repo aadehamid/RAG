@@ -2,23 +2,52 @@ import os
 import sqlite3
 from pathlib import Path
 from typing import List, Tuple, Optional
-
-from llama_parse import LlamaParse
+import pandas as pd
+import chromadb
+from llama_index.core.postprocessor import MetadataReplacementPostProcessor, SentenceTransformerRerank
 from sqlalchemy import create_engine
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv())
 
 # Llama Index imports
-import pandas as pd
-from llama_index.core import Document
-from llama_index.core.node_parser import SentenceSplitter
-from llama_index.core.node_parser import SentenceWindowNodeParser
+from llama_index.core import (Document, StorageContext,
+                              VectorStoreIndex, Settings, SimpleDirectoryReader)
+from llama_index.core.node_parser import (
+    SentenceWindowNodeParser,
+    SentenceSplitter,
+    TokenTextSplitter)
 from llama_index.core.schema import BaseNode
 from llama_index.readers.file import CSVReader
+from llama_index.embeddings.openai import OpenAIEmbedding
+from llama_index.llms.openai import OpenAI
+from llama_index_client import ChromaVectorStore
+from llama_parse import LlamaParse
+from llama_index.core.extractors import (TitleExtractor,
+                                         QuestionsAnsweredExtractor,
+                                         SummaryExtractor, KeywordExtractor)
+from llama_index.extractors.entity import EntityExtractor
+
+# =============================================================================
+# create
+# %%
+model_name = "gpt-3.5-turbo"
+embedding_model_name = "text-embedding-3-small"
+llm = OpenAI(temperature=0.1, model=model_name, max_tokens=512)
+embed_model = OpenAIEmbedding(model=embedding_model_name)
+Settings.llm = llm
+Settings.embed_model = embed_model
+
+# base node parser is a sentence splitter
+text_splitter = SentenceSplitter()
+Settings.text_splitter = text_splitter
 
 
 # %%
 # =============================================================================
+# %%
+# =============================================================================
 # Load data
-async def pdf_data_loader(filepath: str) -> List[Document]:
+def pdf_data_loader(filepath: str) -> List[Document]:
     """
     Loads and parses a PDF file using LlamaParse.
 
@@ -33,18 +62,28 @@ async def pdf_data_loader(filepath: str) -> List[Document]:
     Returns:
     - str: The parsed document(s) in the specified result type.
     """
-    parser = LlamaParse(result_type='markdown',
-                        api_key=os.getenv("LLAMA_PARSER_API_KEY"),
-                        verbose=True)
+    # parser = LlamaParse(result_type='markdown',
+    #                     api_key=os.getenv("LLAMA_PARSER_API_KEY"),
+    #                     verbose=True)
+    #
+    # docs = await parser.aload_data(filepath)
+    parser = LlamaParse(
+        api_key=os.getenv("LLAMA_PARSER_API_KEY"),
+        result_type="markdown",
+        verbose=True,
+    )
 
-    docs = await parser.aload_data(filepath)
+    file_extractor = {".pdf": parser}
+    docs = SimpleDirectoryReader(
+        filepath, file_extractor=file_extractor
+    ).load_data()
 
     return docs
 
 
 def csv_excel_data_loader(filepath: Path, embed_cols: Optional[str] = None,
                           embed_metadata: Optional[str] = None) -> Tuple[
-                          List[Document], Document]:
+    List[Document], Document]:
     """
     Reads .csv and .xlsx data from a file and processes columns for embedding and metadata extraction.
 
@@ -166,4 +205,64 @@ def get_nodes(docs: List[Document]) -> Tuple[List[BaseNode], List[BaseNode]]:
     base_nodes = SentenceSplitter.get_nodes_from_documents(docs)
 
     return nodes, base_nodes
+
+
+# =============================================================================
+# %%
+# Get Index
+def get_index(vector_db_path, collection_name, nodes=None):
+    db = chromadb.PersistentClient(path=vector_db_path)
+    textsplitter = TokenTextSplitter(separator=" ",
+                                     chunk_size=512, chunk_overlap=128)
+    title_extractor = TitleExtractor(nodes=5, llm=llm)
+    # qa_extractor = QuestionsAnsweredExtractor(questions=3)
+    summary_extractor = SummaryExtractor(summaries=["prev", "self"], llm=llm)
+    keyword_extractor = KeywordExtractor(keywords=10, llm=llm),
+    entity_extractor = EntityExtractor(
+        prediction_threshold=0.5,
+        label_entities=False,  # include the entity label in the metadata (can be erroneous)
+        device="cpu",  # set to "cuda" if you have a GPU
+                               )
+    # Check if the collection does not exist
+    if collection_name not in [col.name for col in db.list_collections()]:
+        print("building index", collection_name)
+        chroma_collection = db.get_or_create_collection(collection_name)
+        vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+        index = VectorStoreIndex(nodes=nodes, storage_context=storage_context,
+                                 embed_model=embed_model,
+                                 transformations=[textsplitter,
+                                                  summary_extractor,
+                                                  title_extractor,
+                                                  entity_extractor],
+                                 show_progress=True)
+    else:
+        # This block now correctly handles the case where the
+        # collection already exists
+        print("loading index", collection_name)
+        chroma_collection = db.get_collection(collection_name)
+        vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+        index = VectorStoreIndex.from_vector_store(vector_store, embed_model=embed_model,
+                                                   transformations=[textsplitter,
+                                                                    summary_extractor,
+                                                                    title_extractor,
+                                                                    entity_extractor,
+                                                                    keyword_extractor],
+                                                   show_progress=True)
+
+    return index
+# =============================================================================
+# get query engine
+def get_sentence_window_query_engine(
+        index,
+        similarity_top_k=6,
+        rerank_top_n=2, ):
+    # define postprocessors
+    postproc = MetadataReplacementPostProcessor(target_metadata_key="window")
+    rerank = SentenceTransformerRerank(
+        top_n=rerank_top_n, model="BAAI/bge-reranker-base")
+
+    query_engine = index.as_query_engine(
+        similarity_top_k=similarity_top_k, node_postprocessors=[postproc, rerank])
+    return query_engine
 # =============================================================================
