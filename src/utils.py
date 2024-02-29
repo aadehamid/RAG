@@ -42,7 +42,7 @@ async def pdf_data_loader(filepath: str) -> str:
     return docs
 
 
-def read_csv_excel_data_loader(filepath: Path, embed_cols: Optional[str] = None,
+def csv_excel_data_loader(filepath: Path, embed_cols: Optional[str] = None,
                                embed_metadata: Optional[str] = None) -> Tuple[
     List[Document], Document]:
     """
