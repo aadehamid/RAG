@@ -18,7 +18,7 @@ from llama_index.readers.file import CSVReader
 # %%
 # =============================================================================
 # Load data
-async def pdf_data_loader(filepath: str) -> str:
+async def pdf_data_loader(filepath: str) -> List[Document]:
     """
     Loads and parses a PDF file using LlamaParse.
 
@@ -43,8 +43,8 @@ async def pdf_data_loader(filepath: str) -> str:
 
 
 def csv_excel_data_loader(filepath: Path, embed_cols: Optional[str] = None,
-                               embed_metadata: Optional[str] = None) -> Tuple[
-    List[Document], Document]:
+                          embed_metadata: Optional[str] = None) -> Tuple[
+                          List[Document], Document]:
     """
     Reads .csv and .xlsx data from a file and processes columns for embedding and metadata extraction.
 
