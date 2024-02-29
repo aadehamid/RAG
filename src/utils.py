@@ -7,6 +7,7 @@ import chromadb
 from llama_index.core.postprocessor import MetadataReplacementPostProcessor, SentenceTransformerRerank
 from sqlalchemy import create_engine
 from dotenv import load_dotenv, find_dotenv
+
 load_dotenv(find_dotenv())
 
 # Llama Index imports
@@ -47,7 +48,7 @@ Settings.text_splitter = text_splitter
 # %%
 # =============================================================================
 # Load data
-def pdf_data_loader(filepath: str) -> List[Document]:
+def data_loader(filepath: str, parse: bool = False) -> List[Document]:
     """
     Loads and parses a PDF file using LlamaParse.
 
@@ -62,28 +63,26 @@ def pdf_data_loader(filepath: str) -> List[Document]:
     Returns:
     - str: The parsed document(s) in the specified result type.
     """
-    # parser = LlamaParse(result_type='markdown',
-    #                     api_key=os.getenv("LLAMA_PARSER_API_KEY"),
-    #                     verbose=True)
-    #
-    # docs = await parser.aload_data(filepath)
-    parser = LlamaParse(
-        api_key=os.getenv("LLAMA_PARSER_API_KEY"),
-        result_type="markdown",
-        verbose=True,
-    )
 
-    file_extractor = {".pdf": parser}
-    docs = SimpleDirectoryReader(
-        filepath, file_extractor=file_extractor
-    ).load_data()
+    _, file_extension = os.path.splitext(filepath)
+    if file_extension == ".pdf" and parse:
+        parser = LlamaParse(
+            api_key=os.getenv("LLAMA_PARSER_API_KEY"),
+            result_type="markdown",
+            verbose=True, )
+
+        file_extractor = {".pdf": parser}
+        docs = SimpleDirectoryReader(
+            filepath, file_extractor=file_extractor).load_data()
+    else:
+        docs = SimpleDirectoryReader(filepath).load_data()
 
     return docs
 
 
 def csv_excel_data_loader(filepath: Path, embed_cols: Optional[str] = None,
                           embed_metadata: Optional[str] = None) -> Tuple[
-    List[Document], Document]:
+                            List[Document], Document]:
     """
     Reads .csv and .xlsx data from a file and processes columns for embedding and metadata extraction.
 
@@ -110,6 +109,8 @@ def csv_excel_data_loader(filepath: Path, embed_cols: Optional[str] = None,
         df = pd.read_csv(filepath)
     elif file_extension == ".xlsx":
         df = pd.read_excel(filepath)
+    else:
+        raise ValueError("File must be a CSV or Excel file")
 
     if embed_cols:
         for _, row in df.iterrows():
@@ -222,7 +223,7 @@ def get_index(vector_db_path, collection_name, nodes=None):
         prediction_threshold=0.5,
         label_entities=False,  # include the entity label in the metadata (can be erroneous)
         device="cpu",  # set to "cuda" if you have a GPU
-                               )
+    )
     # Check if the collection does not exist
     if collection_name not in [col.name for col in db.list_collections()]:
         print("building index", collection_name)
@@ -251,6 +252,8 @@ def get_index(vector_db_path, collection_name, nodes=None):
                                                    show_progress=True)
 
     return index
+
+
 # =============================================================================
 # get query engine
 def get_sentence_window_query_engine(
