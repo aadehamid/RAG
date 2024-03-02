@@ -1,35 +1,48 @@
 import os
+import pickle
 import sqlite3
 from pathlib import Path
 from typing import List, Tuple, Optional
 import pandas as pd
 import chromadb
-from llama_index.core.postprocessor import MetadataReplacementPostProcessor, SentenceTransformerRerank
+from llama_index.core.postprocessor import (
+    MetadataReplacementPostProcessor,
+    SentenceTransformerRerank,
+)
 from sqlalchemy import create_engine
 from dotenv import load_dotenv, find_dotenv
 
-load_dotenv(find_dotenv())
-
 # Llama Index imports
-from llama_index.core import (Document, StorageContext,
-                              VectorStoreIndex, Settings, SimpleDirectoryReader)
+from llama_index.core import (
+    Document,
+    StorageContext,
+    VectorStoreIndex,
+    Settings,
+    SimpleDirectoryReader,
+)
 from llama_index.core.node_parser import (
     SentenceWindowNodeParser,
     SentenceSplitter,
-    TokenTextSplitter)
+    TokenTextSplitter, MarkdownElementNodeParser,
+)
 from llama_index.core.schema import BaseNode
 from llama_index.readers.file import CSVReader
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
 from llama_index_client import ChromaVectorStore
 from llama_parse import LlamaParse
-from llama_index.core.extractors import (TitleExtractor,
-                                         QuestionsAnsweredExtractor,
-                                         SummaryExtractor, KeywordExtractor)
+from llama_index.core.extractors import (
+    TitleExtractor,
+    QuestionsAnsweredExtractor,
+    SummaryExtractor,
+    KeywordExtractor,
+)
 from llama_index.extractors.entity import EntityExtractor
 
 import openai
+
 openai.api_key = os.getenv("OPENA_AI_KEY")
+load_dotenv(find_dotenv())
 # =============================================================================
 # create
 # %%
@@ -37,6 +50,7 @@ model_name = "gpt-3.5-turbo"
 embedding_model_name = "text-embedding-3-small"
 llm = OpenAI(temperature=0.1, model=model_name, max_tokens=512)
 embed_model = OpenAIEmbedding(model=embedding_model_name)
+reranker_model = "mixedbread-ai/mxbai-rerank-base-v1"
 Settings.llm = llm
 Settings.embed_model = embed_model
 
@@ -50,7 +64,7 @@ Settings.text_splitter = text_splitter
 # %%
 # =============================================================================
 # Load data
-async def pdf_data_loader(filepath: str, parse: bool = False) -> List[Document]:
+async def pdf_data_loader(filepath: str, num_workers=None) -> List[Document]:
     """
     Loads and parses a PDF file using LlamaParse.
 
@@ -67,24 +81,30 @@ async def pdf_data_loader(filepath: str, parse: bool = False) -> List[Document]:
     """
 
     _, file_extension = os.path.splitext(filepath)
-    if file_extension == ".pdf" and parse:
+    if file_extension == ".pdf":
         parser = LlamaParse(
             api_key=os.getenv("LLAMA_PARSER_API_KEY"),
             result_type="markdown",
-            verbose=True, )
+            language="en",
+            num_workers=num_workers,
+            verbose=True,
+        )
         docs = await parser.aload_data(filepath)
         # file_extractor = {".pdf": parser}
         # docs = SimpleDirectoryReader(
         #     filepath, file_extractor=file_extractor).load_data()
     else:
-        docs = SimpleDirectoryReader(filepath).load_data()
+        # docs = SimpleDirectoryReader(filepath).load_data()
+        raise ValueError("File must be a PDF file")
 
     return docs
 
 
-def csv_excel_data_loader(filepath: Path, embed_cols: Optional[str] = None,
-                          embed_metadata: Optional[str] = None) -> Tuple[
-                            List[Document], Document]:
+def csv_excel_data_loader(
+        filepath: Path,
+        embed_cols: Optional[str] = None,
+        embed_metadata: Optional[str] = None,
+) -> Tuple[List[Document], Document]:
     """
     Reads .csv and .xlsx data from a file and processes columns for embedding and metadata extraction.
 
@@ -118,7 +138,9 @@ def csv_excel_data_loader(filepath: Path, embed_cols: Optional[str] = None,
         for _, row in df.iterrows():
             to_metadata = {col: row[col] for col in embed_metadata if col in row}
             values_to_embed = {k: str(row[k]) for k in embed_cols if k in row}
-            to_embed = "\n".join(f"{k.strip()}: {v.strip()}" for k, v in values_to_embed.items())
+            to_embed = "\n".join(
+                f"{k.strip()}: {v.strip()}" for k, v in values_to_embed.items()
+            )
             newdoc = Document(text=to_embed, metadata=to_metadata)
             docs.append(newdoc)
 
@@ -165,7 +187,7 @@ def load_data_to_sql_db(filepath: str, dbpath: str, tablename: str) -> None:
     engine = create_engine("sqlite:///" + dbpath)
 
     # Write the DataFrame to a table in the SQLite database
-    df.to_sql(tablename, engine, if_exists='replace', index=False)
+    df.to_sql(tablename, engine, if_exists="replace", index=False)
 
     # It's good practice to close the connection when done
     conn.close()
@@ -176,7 +198,9 @@ def load_data_to_sql_db(filepath: str, dbpath: str, tablename: str) -> None:
 # %%
 # =============================================================================
 # Get Nodes
-def get_nodes(docs: List[Document]) -> Tuple[List[BaseNode], List[BaseNode]]:
+def get_nodes(docs: List[Document], node_save_path: str = None,
+              is_markdown: bool = False, num_workers: int =8, base: bool = False) -> Tuple[
+    List[BaseNode], List[BaseNode]]:
     """
     Extracts nodes from documents using both a SentenceWindowNodeParser and a base text splitter.
 
@@ -194,33 +218,44 @@ def get_nodes(docs: List[Document]) -> Tuple[List[BaseNode], List[BaseNode]]:
       The first list contains nodes extracted by the SentenceWindowNodeParser, and the second
       list contains base nodes extracted by the base text splitter.
     """
-    # Initialize the SentenceWindowNodeParser with default settings
-    node_parser = SentenceWindowNodeParser.from_defaults(
-        window_size=3,  # The size of the sentence window
-        window_metadata_key="window",  # Metadata key for window information
-        original_text_metadata_key="original_text",  # Metadata key for original text information
-    )
+    node_parser = None
+    if node_save_path is not None and any(True for _ in os.scandir(node_save_path)):
+        nodes = pickle.load(node_save_path, "rb")
+        return nodes
 
-    # Extract nodes using the SentenceWindowNodeParser
-    nodes = node_parser.get_nodes_from_documents(docs)
+    elif base and not is_markdown:
+        # Extract base nodes using the base text splitter
+        nodes = SentenceSplitter.get_nodes_from_documents(docs)
+    elif is_markdown:
+        node_parser = MarkdownElementNodeParser(num_workers=num_workers)
+        tmp_nodes = node_parser.get_nodes_from_documents(docs)
+        # nodes, object = node_parser.get_nodes_and_objects(tmp_nodes)
 
-    # Extract base nodes using the base text splitter
-    base_nodes = SentenceSplitter.get_nodes_from_documents(docs)
+    else:
+        # Initialize the SentenceWindowNodeParser with default settings
+        node_parser = SentenceWindowNodeParser.from_defaults(
+            window_size=3,  # The size of the sentence window
+            window_metadata_key="window",  # Metadata key for window information
+            original_text_metadata_key="original_text",  # Metadata key for original text information
+        )
+        # Extract nodes using the SentenceWindowNodeParser
+        nodes = node_parser.get_nodes_from_documents(docs)
+    nodes, nodes_object = node_parser.get_nodes_and_objects(tmp_nodes)
+    pickle.dump(nodes, node_save_path, "wb")
 
-    return nodes, base_nodes
+    return nodes, nodes_object
 
 
 # =============================================================================
 # %%
 # Get Index
-def get_index(vector_db_path, collection_name, nodes=None):
+def get_index(vector_db_path, collection_name, nodes=None, nodes_object=None):
     db = chromadb.PersistentClient(path=vector_db_path)
-    textsplitter = TokenTextSplitter(separator=" ",
-                                     chunk_size=512, chunk_overlap=128)
+    textsplitter = TokenTextSplitter(separator=" ", chunk_size=512, chunk_overlap=128)
     title_extractor = TitleExtractor(nodes=5, llm=llm)
     # qa_extractor = QuestionsAnsweredExtractor(questions=3)
     summary_extractor = SummaryExtractor(summaries=["prev", "self"], llm=llm)
-    keyword_extractor = KeywordExtractor(keywords=10, llm=llm),
+    keyword_extractor = (KeywordExtractor(keywords=10, llm=llm),)
     entity_extractor = EntityExtractor(
         prediction_threshold=0.5,
         label_entities=False,  # include the entity label in the metadata (can be erroneous)
@@ -232,26 +267,36 @@ def get_index(vector_db_path, collection_name, nodes=None):
         chroma_collection = db.get_or_create_collection(collection_name)
         vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
-        index = VectorStoreIndex(nodes=nodes, storage_context=storage_context,
-                                 embed_model=embed_model,
-                                 transformations=[textsplitter,
-                                                  summary_extractor,
-                                                  title_extractor,
-                                                  entity_extractor],
-                                 show_progress=True)
+        index = VectorStoreIndex(
+            nodes=nodes+nodes_object,
+            storage_context=storage_context,
+            embed_model=embed_model,
+            transformations=[
+                textsplitter,
+                summary_extractor,
+                title_extractor,
+                entity_extractor,
+            ],
+            show_progress=True,
+        )
     else:
         # This block now correctly handles the case where the
         # collection already exists
         print("loading index", collection_name)
         chroma_collection = db.get_collection(collection_name)
         vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-        index = VectorStoreIndex.from_vector_store(vector_store, embed_model=embed_model,
-                                                   transformations=[textsplitter,
-                                                                    summary_extractor,
-                                                                    title_extractor,
-                                                                    entity_extractor,
-                                                                    keyword_extractor],
-                                                   show_progress=True)
+        index = VectorStoreIndex.from_vector_store(
+            vector_store,
+            embed_model=embed_model,
+            transformations=[
+                textsplitter,
+                summary_extractor,
+                title_extractor,
+                entity_extractor,
+                keyword_extractor,
+            ],
+            show_progress=True,
+        )
 
     return index
 
@@ -261,13 +306,17 @@ def get_index(vector_db_path, collection_name, nodes=None):
 def get_sentence_window_query_engine(
         index,
         similarity_top_k=6,
-        rerank_top_n=2, ):
+        rerank_top_n=2,
+):
     # define postprocessors
     postproc = MetadataReplacementPostProcessor(target_metadata_key="window")
     rerank = SentenceTransformerRerank(
-        top_n=rerank_top_n, model="BAAI/bge-reranker-base")
+        top_n=rerank_top_n, model=reranker_model,
+    )
 
     query_engine = index.as_query_engine(
-        similarity_top_k=similarity_top_k, node_postprocessors=[postproc, rerank])
+        similarity_top_k=similarity_top_k, node_postprocessors=[postproc, rerank]
+    )
     return query_engine
+
 # =============================================================================
