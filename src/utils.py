@@ -2,7 +2,7 @@ import os
 import pickle
 import sqlite3
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Any
 import pandas as pd
 import chromadb
 from llama_index.core.postprocessor import (
@@ -23,13 +23,14 @@ from llama_index.core import (
 from llama_index.core.node_parser import (
     SentenceWindowNodeParser,
     SentenceSplitter,
-    TokenTextSplitter, MarkdownElementNodeParser,
+    TokenTextSplitter,
+    MarkdownElementNodeParser,
 )
-from llama_index.core.schema import BaseNode
+from llama_index.core.schema import BaseNode, IndexNode
 from llama_index.readers.file import CSVReader
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
-from llama_index_client import ChromaVectorStore
+from llama_index_client import ChromaVectorStore, TextNode
 from llama_parse import LlamaParse
 from llama_index.core.extractors import (
     TitleExtractor,
@@ -101,9 +102,9 @@ async def pdf_data_loader(filepath: str, num_workers=None) -> List[Document]:
 
 
 def csv_excel_data_loader(
-        filepath: Path,
-        embed_cols: Optional[str] = None,
-        embed_metadata: Optional[str] = None,
+    filepath: Path,
+    embed_cols: Optional[str] = None,
+    embed_metadata: Optional[str] = None,
 ) -> Tuple[List[Document], Document]:
     """
     Reads .csv and .xlsx data from a file and processes columns for embedding and metadata extraction.
@@ -198,38 +199,35 @@ def load_data_to_sql_db(filepath: str, dbpath: str, tablename: str) -> None:
 # %%
 # =============================================================================
 # Get Nodes
-def get_nodes(docs: List[Document], node_save_path: str = None,
-              is_markdown: bool = False, num_workers: int =8, base: bool = False) -> Tuple[
-    List[BaseNode], List[BaseNode]]:
+def get_nodes(
+    docs: List[Document],
+    node_save_path: str = None,
+    is_markdown: bool = False,
+    num_workers: int = 8,
+    base: bool = False,
+) -> tuple[list[BaseNode], list[IndexNode] | None] | Any:
     """
-    Extracts nodes from documents using both a SentenceWindowNodeParser and a base text splitter.
-
-    This function initializes a SentenceWindowNodeParser with default settings, specifically
-    a window size of 3. It then uses this parser along with a base text splitter to extract
-    nodes from the provided documents. The SentenceWindowNodeParser extracts nodes based on
-    sentence windows, while the base text splitter extracts base nodes without considering
-    sentence windows.
+    Extracts nodes from documents using either a SentenceWindowNodeParser or a base text splitter.
 
     Parameters:
     - docs (List[Document]): A list of Document objects from which nodes are to be extracted.
+    - node_save_path (str): Path to save the nodes.
+    - is_markdown (bool): Flag indicating if the nodes are in markdown format.
+    - num_workers (int): Number of workers for processing.
+    - base (bool): Flag indicating if base nodes should be extracted.
 
     Returns:
-    - Tuple[List[TextNode], List[TextNode]]: A tuple containing two lists of TextNode objects.
-      The first list contains nodes extracted by the SentenceWindowNodeParser, and the second
-      list contains base nodes extracted by the base text splitter.
+    - Tuple[List[BaseNode], List[BaseNode]]: A tuple containing two lists of BaseNode objects.
     """
-    node_parser = None
-    if node_save_path is not None and any(True for _ in os.scandir(node_save_path)):
-        nodes = pickle.load(node_save_path, "rb")
-        return nodes
+    if node_save_path and os.path.exists(node_save_path):
+        return pickle.load(node_save_path, "rb")
 
     elif base and not is_markdown:
         # Extract base nodes using the base text splitter
         nodes = SentenceSplitter.get_nodes_from_documents(docs)
     elif is_markdown:
         node_parser = MarkdownElementNodeParser(num_workers=num_workers)
-        tmp_nodes = node_parser.get_nodes_from_documents(docs)
-        # nodes, object = node_parser.get_nodes_and_objects(tmp_nodes)
+        nodes = node_parser.get_nodes_from_documents(docs)
 
     else:
         # Initialize the SentenceWindowNodeParser with default settings
@@ -240,8 +238,11 @@ def get_nodes(docs: List[Document], node_save_path: str = None,
         )
         # Extract nodes using the SentenceWindowNodeParser
         nodes = node_parser.get_nodes_from_documents(docs)
-    nodes, nodes_object = node_parser.get_nodes_and_objects(tmp_nodes)
-    pickle.dump(nodes, node_save_path, "wb")
+    nodes_object = None
+    if is_markdown:
+        nodes, nodes_object = node_parser.get_nodes_and_objects(nodes)
+
+    # pickle.dump(nodes, node_save_path, "wb")
 
     return nodes, nodes_object
 
@@ -268,7 +269,7 @@ def get_index(vector_db_path, collection_name, nodes=None, nodes_object=None):
         vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
         index = VectorStoreIndex(
-            nodes=nodes+nodes_object,
+            nodes=nodes + nodes_object,
             storage_context=storage_context,
             embed_model=embed_model,
             transformations=[
@@ -304,19 +305,21 @@ def get_index(vector_db_path, collection_name, nodes=None, nodes_object=None):
 # =============================================================================
 # get query engine
 def get_sentence_window_query_engine(
-        index,
-        similarity_top_k=6,
-        rerank_top_n=2,
+    index,
+    similarity_top_k=6,
+    rerank_top_n=2,
 ):
     # define postprocessors
     postproc = MetadataReplacementPostProcessor(target_metadata_key="window")
     rerank = SentenceTransformerRerank(
-        top_n=rerank_top_n, model=reranker_model,
+        top_n=rerank_top_n,
+        model=reranker_model,
     )
 
     query_engine = index.as_query_engine(
         similarity_top_k=similarity_top_k, node_postprocessors=[postproc, rerank]
     )
     return query_engine
+
 
 # =============================================================================
