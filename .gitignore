@@ -1,5 +1,6 @@
 chromadb/*
-.idea/
+llamadocs/
+nodes/
 .env
 .DS_Store
 data/pdfs/
