@@ -1,4 +1,6 @@
-chromadb/*
+chromadb/
+sqlite/
+.idea/
 llamadocs/
 nodes/
 .env
