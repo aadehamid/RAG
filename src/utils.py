@@ -30,8 +30,8 @@ from llama_index.core.schema import BaseNode, IndexNode
 from llama_index.readers.file import CSVReader
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
-from llama_index_client import ChromaVectorStore, TextNode
 from llama_parse import LlamaParse
+from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.core.extractors import (
     TitleExtractor,
     QuestionsAnsweredExtractor,
@@ -102,9 +102,9 @@ async def pdf_data_loader(filepath: str, num_workers=None) -> List[Document]:
 
 
 def csv_excel_data_loader(
-    filepath: Path,
-    embed_cols: Optional[str] = None,
-    embed_metadata: Optional[str] = None,
+        filepath: Path,
+        embed_cols: Optional[str] = None,
+        embed_metadata: Optional[str] = None,
 ) -> Tuple[List[Document], Document]:
     """
     Reads .csv and .xlsx data from a file and processes columns for embedding and metadata extraction.
@@ -200,11 +200,11 @@ def load_data_to_sql_db(filepath: str, dbpath: str, tablename: str) -> None:
 # =============================================================================
 # Get Nodes
 def get_nodes(
-    docs: List[Document],
-    node_save_path: str = None,
-    is_markdown: bool = False,
-    num_workers: int = 8,
-    base: bool = False,
+        docs: List[Document],
+        node_save_path: str = None,
+        is_markdown: bool = False,
+        num_workers: int = 8,
+        base: bool = False,
 ) -> tuple[list[BaseNode], list[IndexNode] | None] | Any:
     """
     Extracts nodes from documents using either a SentenceWindowNodeParser or a base text splitter.
@@ -262,6 +262,11 @@ def get_index(vector_db_path, collection_name, nodes=None, nodes_object=None):
         label_entities=False,  # include the entity label in the metadata (can be erroneous)
         device="cpu",  # set to "cuda" if you have a GPU
     )
+    # Concatenate the list and the variable
+    if nodes_object is None:
+        nodes = nodes
+    elif isinstance(nodes_object, list):
+        nodes = nodes + nodes_object,
     # Check if the collection does not exist
     if collection_name not in [col.name for col in db.list_collections()]:
         print("building index", collection_name)
@@ -269,7 +274,7 @@ def get_index(vector_db_path, collection_name, nodes=None, nodes_object=None):
         vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
         index = VectorStoreIndex(
-            nodes=nodes + nodes_object,
+            nodes=nodes,
             storage_context=storage_context,
             embed_model=embed_model,
             transformations=[
@@ -289,13 +294,6 @@ def get_index(vector_db_path, collection_name, nodes=None, nodes_object=None):
         index = VectorStoreIndex.from_vector_store(
             vector_store,
             embed_model=embed_model,
-            transformations=[
-                textsplitter,
-                summary_extractor,
-                title_extractor,
-                entity_extractor,
-                keyword_extractor,
-            ],
             show_progress=True,
         )
 
@@ -305,9 +303,9 @@ def get_index(vector_db_path, collection_name, nodes=None, nodes_object=None):
 # =============================================================================
 # get query engine
 def get_sentence_window_query_engine(
-    index,
-    similarity_top_k=6,
-    rerank_top_n=2,
+        index,
+        similarity_top_k=6,
+        rerank_top_n=2,
 ):
     # define postprocessors
     postproc = MetadataReplacementPostProcessor(target_metadata_key="window")
@@ -320,6 +318,5 @@ def get_sentence_window_query_engine(
         similarity_top_k=similarity_top_k, node_postprocessors=[postproc, rerank]
     )
     return query_engine
-
 
 # =============================================================================
