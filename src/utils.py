@@ -5,15 +5,13 @@ from pathlib import Path
 from typing import List, Tuple, Optional, Any
 import pandas as pd
 import chromadb
-from llama_index.core.indices.query.query_transform import StepDecomposeQueryTransform
 from llama_index.core.postprocessor import (
     MetadataReplacementPostProcessor,
     SentenceTransformerRerank, LongContextReorder,
 )
-from llama_index.core.query_engine import SubQuestionQueryEngine, RouterQueryEngine, MultiStepQueryEngine
-from llama_index.core.selectors import PydanticSingleSelector, LLMSingleSelector
+from llama_index.core.query_engine import SubQuestionQueryEngine, RouterQueryEngine
+from llama_index.core.selectors import LLMSingleSelector
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
-from llama_index.postprocessor.longllmlingua import LongLLMLinguaPostprocessor
 from sqlalchemy import create_engine
 from dotenv import load_dotenv, find_dotenv
 
@@ -22,9 +20,7 @@ from llama_index.core import (
     Document,
     StorageContext,
     VectorStoreIndex,
-    Settings,
-    SimpleDirectoryReader,
-)
+    Settings,)
 from llama_index.core.node_parser import (
     SentenceWindowNodeParser,
     SentenceSplitter,
@@ -39,7 +35,6 @@ from llama_parse import LlamaParse
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.core.extractors import (
     TitleExtractor,
-    QuestionsAnsweredExtractor,
     SummaryExtractor,
     KeywordExtractor,
 )
@@ -47,7 +42,7 @@ from llama_index.extractors.entity import EntityExtractor
 
 import openai
 
-openai.api_key = os.getenv("OPENA_AI_KEY")
+openai.api_key = os.getenv("OPENAI_API_KEY")
 load_dotenv(find_dotenv())
 # =============================================================================
 # create
@@ -130,7 +125,6 @@ def csv_excel_data_loader(
     """
     docs = []
     document = None
-    df = None
     _, file_extension = os.path.splitext(filepath)
 
     if file_extension == ".csv":
@@ -287,6 +281,7 @@ def get_index(vector_db_path, collection_name, nodes=None, nodes_object=None):
                 summary_extractor,
                 title_extractor,
                 entity_extractor,
+                keyword_extractor,
             ],
             show_progress=True,
         )
