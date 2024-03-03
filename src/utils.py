@@ -9,6 +9,9 @@ from llama_index.core.postprocessor import (
     MetadataReplacementPostProcessor,
     SentenceTransformerRerank,
 )
+from llama_index.core.query_engine import SubQuestionQueryEngine, RouterQueryEngine
+from llama_index.core.selectors import PydanticSingleSelector, LLMSingleSelector
+from llama_index.core.tools import QueryEngineTool, ToolMetadata
 from sqlalchemy import create_engine
 from dotenv import load_dotenv, find_dotenv
 
@@ -326,7 +329,41 @@ def get_sentence_window_query_engine(
                                              node_postprocessors=[rerank],
                                              alpha=0.5,
                                              vector_store_query_mode="hybrid",)
-    
+    simple_tool = QueryEngineTool.from_defaults(
+        query_engine=query_engine,
+        description="Useful when the query is relatively straightforward and "
+                    "can be answered with direct information retrieval, "
+                    "without the need for complex transformations.",)
+
+    query_engine_tools = [
+        QueryEngineTool(
+            query_engine = query_engine,
+            metadata=ToolMetadata(
+                name="Tesla and ESG",
+                description="Tesla 10K and Sustainability Report from Deloitte, "
+                            "McKinsey and Tesla",
+            )
+
+        ),
+    ]
+    sub_query_engine = SubQuestionQueryEngine.from_defaults(
+        query_engine_tools=query_engine_tools
+    )
+
+    sub_question_tool = QueryEngineTool.from_defaults(
+        query_engine=sub_query_engine,
+        description="Useful when asking question about Tesla's 10k and sustainability report "
+                    "of Tesla, Deloitte, and McKinsey",
+        )
+    query_engine = RouterQueryEngine(
+        selector=LLMSingleSelector.from_defaults(),
+        query_engine_tools=[
+            simple_tool,
+            sub_question_tool,
+        ],
+        verbose=True,
+    )
+
     return query_engine
 
 # =============================================================================
