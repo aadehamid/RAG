@@ -306,17 +306,27 @@ def get_sentence_window_query_engine(
         index,
         similarity_top_k=6,
         rerank_top_n=2,
+        window=True,
 ):
-    # define postprocessors
-    postproc = MetadataReplacementPostProcessor(target_metadata_key="window")
-    rerank = SentenceTransformerRerank(
-        top_n=rerank_top_n,
-        model=reranker_model,
-    )
+    rerank = SentenceTransformerRerank(top_n=rerank_top_n,
+                                       model=reranker_model, )
+    if window:
+        # define postprocessors
+        postproc = MetadataReplacementPostProcessor(target_metadata_key="window")
+        # rerank = SentenceTransformerRerank(top_n=rerank_top_n,
+        #                                    model=reranker_model, )
 
-    query_engine = index.as_query_engine(
-        similarity_top_k=similarity_top_k, node_postprocessors=[postproc, rerank]
-    )
+        query_engine = index.as_query_engine(similarity_top_k=similarity_top_k,
+                                             node_postprocessors=[postproc, rerank],
+                                             alpha=0.5,
+                                             vector_store_query_mode="hybrid",
+                                             )
+    else:
+        query_engine = index.as_query_engine(similarity_top_k=similarity_top_k,
+                                             node_postprocessors=[rerank],
+                                             alpha=0.5,
+                                             vector_store_query_mode="hybrid",)
+    
     return query_engine
 
 # =============================================================================
