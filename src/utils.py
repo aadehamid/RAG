@@ -5,13 +5,15 @@ from pathlib import Path
 from typing import List, Tuple, Optional, Any
 import pandas as pd
 import chromadb
+from llama_index.core.indices.query.query_transform import StepDecomposeQueryTransform
 from llama_index.core.postprocessor import (
     MetadataReplacementPostProcessor,
-    SentenceTransformerRerank,
+    SentenceTransformerRerank, LongContextReorder,
 )
-from llama_index.core.query_engine import SubQuestionQueryEngine, RouterQueryEngine
+from llama_index.core.query_engine import SubQuestionQueryEngine, RouterQueryEngine, MultiStepQueryEngine
 from llama_index.core.selectors import PydanticSingleSelector, LLMSingleSelector
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
+from llama_index.postprocessor.longllmlingua import LongLLMLinguaPostprocessor
 from sqlalchemy import create_engine
 from dotenv import load_dotenv, find_dotenv
 
@@ -313,6 +315,19 @@ def get_sentence_window_query_engine(
 ):
     rerank = SentenceTransformerRerank(top_n=rerank_top_n,
                                        model=reranker_model, )
+    # prompt_compression = LongLLMLinguaPostprocessor(
+    #     instruction_str="Given the context, please answer the final question",
+    #     target_token=300,
+    #     rank_method="longllmlingua",
+    #     device_map="mps",
+    #     additional_compress_kwargs={
+    #         "condition_compare": True,
+    #         "condition_in_question": "after",
+    #         "context_budget": "+100",
+    #         "reorder_context": "sort",  # enable document reorder
+    #     }, )
+    reorder = LongContextReorder()
+
     if window:
         # define postprocessors
         postproc = MetadataReplacementPostProcessor(target_metadata_key="window")
@@ -320,24 +335,31 @@ def get_sentence_window_query_engine(
         #                                    model=reranker_model, )
 
         query_engine = index.as_query_engine(similarity_top_k=similarity_top_k,
-                                             node_postprocessors=[postproc, rerank],
+                                             node_postprocessors=[postproc,
+                                                                  rerank,
+                                                                  # prompt_compression,
+                                                                  reorder,
+                                                                  ],
                                              alpha=0.5,
                                              vector_store_query_mode="hybrid",
                                              )
     else:
         query_engine = index.as_query_engine(similarity_top_k=similarity_top_k,
-                                             node_postprocessors=[rerank],
+                                             node_postprocessors=[rerank,
+                                                                  # prompt_compression,
+                                                                  reorder,
+                                                                  ],
                                              alpha=0.5,
-                                             vector_store_query_mode="hybrid",)
+                                             vector_store_query_mode="hybrid", )
     simple_tool = QueryEngineTool.from_defaults(
         query_engine=query_engine,
         description="Useful when the query is relatively straightforward and "
                     "can be answered with direct information retrieval, "
-                    "without the need for complex transformations.",)
+                    "without the need for complex transformations.", )
 
     query_engine_tools = [
         QueryEngineTool(
-            query_engine = query_engine,
+            query_engine=query_engine,
             metadata=ToolMetadata(
                 name="Tesla and ESG",
                 description="Tesla 10K and Sustainability Report from Deloitte, "
@@ -354,12 +376,29 @@ def get_sentence_window_query_engine(
         query_engine=sub_query_engine,
         description="Useful when asking question about Tesla's 10k and sustainability report "
                     "of Tesla, Deloitte, and McKinsey",
-        )
+    )
+    # step_decompose_transform = StepDecomposeQueryTransform(llm=llm, verbose=True)
+    # index_summary = "Breaks down initial query"
+    # multi_step_engine = MultiStepQueryEngine(
+    #     query_engine=query_engine,
+    #     query_transform=step_decompose_transform,
+    #     index_summary=index_summary, )
+    # multi_step_tool = QueryEngineTool.from_defaults(
+    #     query_engine=multi_step_engine,
+    #     description="Useful when complex or multifaceted information needs are present, "
+    #                 "and a single query isn't sufficient to "
+    #                 "fully understand or retrieve the necessary information. "
+    #                 "This approach is especially beneficial in environments "
+    #                 "where the context evolves with each interaction or "
+    #                 "where the information is layered and "
+    #                 "requires iterative exploration.", )
+
     query_engine = RouterQueryEngine(
         selector=LLMSingleSelector.from_defaults(),
         query_engine_tools=[
             simple_tool,
             sub_question_tool,
+            # multi_step_tool,
         ],
         verbose=True,
     )
