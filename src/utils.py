@@ -2,9 +2,11 @@ import os
 import pickle
 import sqlite3
 from pathlib import Path
-from typing import List, Tuple, Optional, Any
+from typing import List, Tuple, Optional, Any, Union
 import pandas as pd
 import chromadb
+from llama_index.core.indices.struct_store import NLSQLTableQueryEngine, SQLTableRetrieverQueryEngine
+from llama_index.core.objects import SQLTableNodeMapping, SQLTableSchema, ObjectIndex
 from llama_index.core.postprocessor import (
     MetadataReplacementPostProcessor,
     SentenceTransformerRerank, LongContextReorder,
@@ -12,7 +14,7 @@ from llama_index.core.postprocessor import (
 from llama_index.core.query_engine import SubQuestionQueryEngine, RouterQueryEngine
 from llama_index.core.selectors import LLMSingleSelector
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, Engine
 from dotenv import load_dotenv, find_dotenv
 
 # Llama Index imports
@@ -20,7 +22,7 @@ from llama_index.core import (
     Document,
     StorageContext,
     VectorStoreIndex,
-    Settings,)
+    Settings, SQLDatabase, )
 from llama_index.core.node_parser import (
     SentenceWindowNodeParser,
     SentenceSplitter,
@@ -372,21 +374,6 @@ def get_sentence_window_query_engine(
         description="Useful when asking question about Tesla's 10k and sustainability report "
                     "of Tesla, Deloitte, and McKinsey",
     )
-    # step_decompose_transform = StepDecomposeQueryTransform(llm=llm, verbose=True)
-    # index_summary = "Breaks down initial query"
-    # multi_step_engine = MultiStepQueryEngine(
-    #     query_engine=query_engine,
-    #     query_transform=step_decompose_transform,
-    #     index_summary=index_summary, )
-    # multi_step_tool = QueryEngineTool.from_defaults(
-    #     query_engine=multi_step_engine,
-    #     description="Useful when complex or multifaceted information needs are present, "
-    #                 "and a single query isn't sufficient to "
-    #                 "fully understand or retrieve the necessary information. "
-    #                 "This approach is especially beneficial in environments "
-    #                 "where the context evolves with each interaction or "
-    #                 "where the information is layered and "
-    #                 "requires iterative exploration.", )
 
     query_engine = RouterQueryEngine(
         selector=LLMSingleSelector.from_defaults(),
@@ -400,4 +387,71 @@ def get_sentence_window_query_engine(
 
     return query_engine
 
+
 # =============================================================================
+# create text to sql function
+# =============================================================================
+
+def text_to_query_engine(all_table_names: List[str], engine: Engine,
+                         temperature: float = 0.1, not_know_table: bool = True) -> Union[
+    NLSQLTableQueryEngine, SQLTableRetrieverQueryEngine]:
+    """
+    Convert text to a query engine for a SQL database.
+
+    This function initializes the necessary components for querying a SQL database using OpenAI models. It sets up both
+    the language model and the embedding model from OpenAI, configures the service context, and initializes the SQL database
+    connection. Depending on whether the table to be queried is known ahead of time, it returns either a NLSQLTableQueryEngine
+    or a SQLTableRetrieverQueryEngine.
+
+    Args:
+        model_name (str): The name of the OpenAI model to use.
+        embedding_model_name (str): The name of the OpenAI embedding model to use.
+        table_name (str): The name of the table in the SQL database to query.
+        engine (str): The engine to use for the SQL database.
+        temperature (float, optional): The temperature to use for the OpenAI model. Defaults to 0.1.
+        not_know_table (bool, optional): Whether the table to query is not known ahead of time. Defaults to True.
+
+    Returns:
+        Tuple[Union[NLSQLTableQueryEngine, SQLTableRetrieverQueryEngine],
+        SQLDatabase, ServiceContext]: The query engine for the SQL database.
+    """
+    # Initialize the OpenAI model with the specified temperature and model name
+    llm = OpenAI(temperature=temperature, model=model_name)
+
+    # Initialize the OpenAI embedding model with the specified model name
+    embed_model = OpenAIEmbedding(model=embedding_model_name)
+
+    # Create a service context with the initialized models
+    # service_context = ServiceContext.from_defaults(llm=llm, embed_model=embed_model)
+
+    # Set the global service context for further use in the application
+    # set_global_service_context(service_context)
+
+    # Initialize the SQL database with the specified engine and include the table to be queried
+    sql_database = SQLDatabase(engine, include_tables=all_table_names)
+
+    if not_know_table:
+        # If the table to query is not known ahead of time, use SQLTableRetrieverQueryEngine
+        # This involves creating a mapping and schema objects for the SQL tables
+        table_node_mapping = SQLTableNodeMapping(sql_database)
+        table_schema_objs = []
+        for table_name in all_table_names:
+            table_schema_objs.append(SQLTableSchema(table_name=table_name))
+
+        obj_index = ObjectIndex.from_objects(
+            table_schema_objs,
+            table_node_mapping,
+            VectorStoreIndex,
+        )
+        # Initialize the query engine with the SQL database and the object index for retrieving tables
+        query_engine = SQLTableRetrieverQueryEngine(
+            sql_database, obj_index.as_retriever(similarity_top_k=1)
+        )
+    else:
+        # If the table to query is known ahead of time, use NLSQLTableQueryEngine
+        query_engine = NLSQLTableQueryEngine(
+            sql_database=sql_database, tables=all_table_names)
+
+    # Return the initialized query engine
+    # return query_engine, sql_database
+    return query_engine
