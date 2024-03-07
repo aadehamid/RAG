@@ -1,5 +1,6 @@
 import os
 import pickle
+import re
 import sqlite3
 from pathlib import Path
 from typing import List, Tuple, Optional, Any, Union
@@ -14,6 +15,7 @@ from llama_index.core.postprocessor import (
 from llama_index.core.query_engine import SubQuestionQueryEngine, RouterQueryEngine
 from llama_index.core.selectors import LLMSingleSelector
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
+from pandas import DataFrame
 from sqlalchemy import create_engine, Engine
 from dotenv import load_dotenv, find_dotenv
 
@@ -65,6 +67,13 @@ Settings.text_splitter = text_splitter
 # %%
 # =============================================================================
 # %%
+def clean_column_names(df: DataFrame) -> DataFrame:
+    # Define a regex pattern to match non-alphanumeric characters, spaces, and multiple spaces between words
+    pattern = re.compile(r'(?<=\w)[^\w\s]+|(?<=\s)\s+|\s+')
+
+    # Clean column names by replacing non-alphanumeric characters, spaces, and multiple spaces with underscores
+    df.columns = [pattern.sub('_', col) for col in df.columns]
+    return df
 # =============================================================================
 # Load data
 async def pdf_data_loader(filepath: str, num_workers=None) -> List[Document]:
@@ -135,7 +144,7 @@ def csv_excel_data_loader(
         df = pd.read_excel(filepath)
     else:
         raise ValueError("File must be a CSV or Excel file")
-
+    df = clean_column_names(df)
     if embed_cols:
         for _, row in df.iterrows():
             to_metadata = {col: row[col] for col in embed_metadata if col in row}
@@ -154,7 +163,7 @@ def csv_excel_data_loader(
     return docs, document
 
 
-def load_data_to_sql_db(filepath: str, dbpath: str, tablename: str) -> None:
+def load_data_to_sql_db(filepath: str, dbpath: str, tablename: str) -> DataFrame:
     """
     Loads data from a CSV file into an SQL database table.
 
@@ -183,7 +192,12 @@ def load_data_to_sql_db(filepath: str, dbpath: str, tablename: str) -> None:
 
     else:
         raise ValueError("File must be a CSV or Excel file")
-
+    df = clean_column_names(df)
+    #     # Define a regex pattern to match non-alphanumeric characters, spaces, and multiple spaces between words
+    # pattern = re.compile(r'(?<=\w)[^\w\s]+|(?<=\s)\s+|\s+')
+    #
+    # # Clean column names by replacing non-alphanumeric characters, spaces, and multiple spaces with underscores
+    # df.columns = [pattern.sub('_', col) for col in df.columns]
     # Create a connection to the SQLite database and an engine
     conn = sqlite3.connect(dbpath)
     engine = create_engine("sqlite:///" + dbpath)
@@ -193,7 +207,7 @@ def load_data_to_sql_db(filepath: str, dbpath: str, tablename: str) -> None:
 
     # It's good practice to close the connection when done
     conn.close()
-    return None
+    return df
 
 
 # =============================================================================
@@ -246,6 +260,16 @@ def get_nodes(
     # pickle.dump(nodes, node_save_path, "wb")
 
     return nodes, nodes_object
+
+
+def concat_node_object(node, node_object):
+    if node_object is None:
+        result = node
+    elif isinstance(node_object, list):
+        result = node + node_object
+    else:
+        raise ValueError("my_variable must be either None or a list")
+    return result
 
 
 # =============================================================================
@@ -348,42 +372,42 @@ def get_sentence_window_query_engine(
                                                                   ],
                                              alpha=0.5,
                                              vector_store_query_mode="hybrid", )
-    simple_tool = QueryEngineTool.from_defaults(
-        query_engine=query_engine,
-        description="Useful when the query is relatively straightforward and "
-                    "can be answered with direct information retrieval, "
-                    "without the need for complex transformations.", )
-
-    query_engine_tools = [
-        QueryEngineTool(
-            query_engine=query_engine,
-            metadata=ToolMetadata(
-                name="Tesla and ESG",
-                description="Tesla 10K and Sustainability Report from Deloitte, "
-                            "McKinsey and Tesla",
-            )
-
-        ),
-    ]
-    sub_query_engine = SubQuestionQueryEngine.from_defaults(
-        query_engine_tools=query_engine_tools
-    )
-
-    sub_question_tool = QueryEngineTool.from_defaults(
-        query_engine=sub_query_engine,
-        description="Useful when asking question about Tesla's 10k and sustainability report "
-                    "of Tesla, Deloitte, and McKinsey",
-    )
-
-    query_engine = RouterQueryEngine(
-        selector=LLMSingleSelector.from_defaults(),
-        query_engine_tools=[
-            simple_tool,
-            sub_question_tool,
-            # multi_step_tool,
-        ],
-        verbose=True,
-    )
+    # simple_tool = QueryEngineTool.from_defaults(
+    #     query_engine=query_engine,
+    #     description="Useful when the query is relatively straightforward and "
+    #                 "can be answered with direct information retrieval, "
+    #                 "without the need for complex transformations.", )
+    #
+    # query_engine_tools = [
+    #     QueryEngineTool(
+    #         query_engine=query_engine,
+    #         metadata=ToolMetadata(
+    #             name="Tesla and ESG",
+    #             description="Tesla 10K and Sustainability Report from Deloitte, "
+    #                         "McKinsey and Tesla",
+    #         )
+    #
+    #     ),
+    # ]
+    # sub_query_engine = SubQuestionQueryEngine.from_defaults(
+    #     query_engine_tools=query_engine_tools
+    # )
+    #
+    # sub_question_tool = QueryEngineTool.from_defaults(
+    #     query_engine=sub_query_engine,
+    #     description="Useful when asking question about Tesla's 10k and sustainability report "
+    #                 "of Tesla, Deloitte, and McKinsey",
+    # )
+    #
+    # query_engine = RouterQueryEngine(
+    #     selector=LLMSingleSelector.from_defaults(),
+    #     query_engine_tools=[
+    #         simple_tool,
+    #         sub_question_tool,
+    #         # multi_step_tool,
+    #     ],
+    #     verbose=True,
+    # )
 
     return query_engine
 
