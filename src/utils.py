@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Tuple, Optional, Any, Union
 import pandas as pd
 import chromadb
+from IPython.core.display_functions import display
 from llama_index.core.indices.struct_store import NLSQLTableQueryEngine, SQLTableRetrieverQueryEngine
 from llama_index.core.objects import SQLTableNodeMapping, SQLTableSchema, ObjectIndex
 from llama_index.core.postprocessor import (
@@ -16,6 +17,8 @@ from llama_index.core.query_engine import SubQuestionQueryEngine, RouterQueryEng
 from llama_index.core.selectors import LLMSingleSelector
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
 from pandas import DataFrame
+from rich.markdown import Markdown
+# from IPython.core.display import Markdown
 from sqlalchemy import create_engine, Engine
 from dotenv import load_dotenv, find_dotenv
 
@@ -74,6 +77,19 @@ def clean_column_names(df: DataFrame) -> DataFrame:
     # Clean column names by replacing non-alphanumeric characters, spaces, and multiple spaces with underscores
     df.columns = [pattern.sub('_', col) for col in df.columns]
     return df
+
+
+# =============================================================================
+# Display Llama Prompt
+# define prompt viewing function
+def display_prompt_dict(prompts_dict):
+    for k, p in prompts_dict.items():
+        text_md = f"**Prompt Key**: {k}<br>" f"**Text:** <br>"
+        display(Markdown(text_md))
+        print(p.get_template())
+        display(Markdown("<br><br>"))
+
+
 # =============================================================================
 # Load data
 async def pdf_data_loader(filepath: str, num_workers=None) -> List[Document]:
@@ -215,49 +231,56 @@ def load_data_to_sql_db(filepath: str, dbpath: str, tablename: str) -> DataFrame
 # =============================================================================
 # Get Nodes
 def get_nodes(
-        docs: List[Document],
-        node_save_path: str = None,
-        is_markdown: bool = False,
-        num_workers: int = 8,
-        base: bool = False,
-) -> tuple[list[BaseNode], list[IndexNode] | None] | Any:
+    docs: List[Document],
+    node_save_path: Optional[Union[str, Path]] = None,
+    is_markdown: bool = False,
+    num_workers: int = 8,
+    base: bool = False,
+) -> Tuple[List[BaseNode], Optional[List[IndexNode]]]:
     """
     Extracts nodes from documents using either a SentenceWindowNodeParser or a base text splitter.
 
     Parameters:
     - docs (List[Document]): A list of Document objects from which nodes are to be extracted.
-    - node_save_path (str): Path to save the nodes.
+    - node_save_path (Optional[Union[str, Path]]): Path to save the nodes.
     - is_markdown (bool): Flag indicating if the nodes are in markdown format.
     - num_workers (int): Number of workers for processing.
     - base (bool): Flag indicating if base nodes should be extracted.
 
     Returns:
-    - Tuple[List[BaseNode], List[BaseNode]]: A tuple containing two lists of BaseNode objects.
+    - Tuple[List[BaseNode], Optional[List[IndexNode]]]: A tuple containing a list of BaseNode objects
+      and an optional list of IndexNode objects.
     """
     if node_save_path and os.path.exists(node_save_path):
-        return pickle.load(node_save_path, "rb")
+        with open(node_save_path, "rb") as file:
+            return pickle.load(file)
 
-    elif base and not is_markdown:
+    if base and not is_markdown:
         # Extract base nodes using the base text splitter
         nodes = SentenceSplitter.get_nodes_from_documents(docs)
-    elif is_markdown:
-        node_parser = MarkdownElementNodeParser(num_workers=num_workers)
-        nodes = node_parser.get_nodes_from_documents(docs)
-
+        nodes_object = None
     else:
-        # Initialize the SentenceWindowNodeParser with default settings
-        node_parser = SentenceWindowNodeParser.from_defaults(
-            window_size=3,  # The size of the sentence window
-            window_metadata_key="window",  # Metadata key for window information
-            original_text_metadata_key="original_text",  # Metadata key for original text information
-        )
-        # Extract nodes using the SentenceWindowNodeParser
-        nodes = node_parser.get_nodes_from_documents(docs)
-    nodes_object = None
-    if is_markdown:
-        nodes, nodes_object = node_parser.get_nodes_and_objects(nodes)
+        if is_markdown:
+            node_parser = MarkdownElementNodeParser(num_workers=num_workers)
+        else:
+            # Initialize the SentenceWindowNodeParser with default settings
+            node_parser = SentenceWindowNodeParser.from_defaults(
+                window_size=3,  # The size of the sentence window
+                window_metadata_key="window",  # Metadata key for window information
+                original_text_metadata_key="original_text",  # Metadata key for original text information
+            )
 
-    # pickle.dump(nodes, node_save_path, "wb")
+        # Extract nodes using the selected node parser
+        nodes = node_parser.get_nodes_from_documents(docs)
+
+        if is_markdown:
+            nodes, nodes_object = node_parser.get_nodes_and_objects(nodes)
+        else:
+            nodes_object = None
+
+    # if node_save_path:
+    #     with open(node_save_path, "wb") as file:
+    #         pickle.dump(nodes, file)
 
     return nodes, nodes_object
 
