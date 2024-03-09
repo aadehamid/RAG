@@ -1,7 +1,7 @@
 chromadb/
 sqlite/
 .idea/
-data/Work_Order_Consilidated.xlsx
+data/csv/Work_Order_Consilidated.xlsx
 llamadocs/
 nodes/
 .env
