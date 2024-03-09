@@ -1,6 +1,7 @@
 chromadb/
 sqlite/
 .idea/
+idata/
 llamadocs/
 nodes/
 .env
