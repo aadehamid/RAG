@@ -97,7 +97,7 @@ def display_prompt_dict(prompts_dict):
 
 # =============================================================================
 # Load data
-async def pdf_data_loader(filepath: str, num_workers=None) -> List[Document]:
+async def pdf_data_loader(filepaths: List[str], num_workers=None) -> List[Document]:
     """
     Loads and parses a PDF file using LlamaParse.
 
@@ -112,23 +112,22 @@ async def pdf_data_loader(filepath: str, num_workers=None) -> List[Document]:
     Returns:
     - str: The parsed document(s) in the specified result type.
     """
+    for file_path in filepaths:
+        _, file_extension = os.path.splitext(file_path)
+        if file_extension != ".pdf":
+            raise ValueError("File must be a PDF file")
 
-    _, file_extension = os.path.splitext(filepath)
-    if file_extension == ".pdf":
-        parser = LlamaParse(
-            api_key=os.getenv("LLAMA_PARSER_API_KEY"),
-            result_type="markdown",
-            language="en",
-            num_workers=num_workers,
-            verbose=True,
-        )
-        docs = await parser.aload_data(filepath)
-        # file_extractor = {".pdf": parser}
-        # docs = SimpleDirectoryReader(
-        #     filepath, file_extractor=file_extractor).load_data()
-    else:
-        # docs = SimpleDirectoryReader(filepath).load_data()
-        raise ValueError("File must be a PDF file")
+    parser = LlamaParse(
+        api_key=os.getenv("LLAMA_PARSER_API_KEY"),
+        result_type="markdown",
+        language="en",
+        num_workers=num_workers,
+        verbose=True,
+    )
+    docs = await parser.aload_data(filepaths)
+    # file_extractor = {".pdf": parser}
+    # docs = SimpleDirectoryReader(
+    #     filepath, file_extractor=file_extractor).load_data()
 
     return docs
 
