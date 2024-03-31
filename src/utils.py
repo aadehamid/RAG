@@ -57,9 +57,9 @@ load_dotenv(find_dotenv())
 # %%
 model_name = "gpt-3.5-turbo"
 embedding_model_name = "text-embedding-3-small"
-# llm = OpenAI(temperature=0.1, model=model_name, max_tokens=512)
+llm = OpenAI(temperature=0.1, model=model_name, max_tokens=512)
 # llm = Anthropic(model="claude-3-opus-20240229", max_tokens=512, temperature=0.0)
-llm = Anthropic(model="claude-3-haiku-20240307", max_tokens=512, temperature=0.0)
+# llm = Anthropic(model="claude-3-haiku-20240307", max_tokens=512, temperature=0.0,)
 embed_model = OpenAIEmbedding(model=embedding_model_name)
 reranker_model = "mixedbread-ai/mxbai-rerank-base-v1"
 Settings.llm = llm
@@ -97,7 +97,7 @@ def display_prompt_dict(prompts_dict):
 
 # =============================================================================
 # Load data
-async def pdf_data_loader(filepaths: List[str], num_workers=None) -> List[Document]:
+async def pdf_data_loader(filedir: Path, num_workers=None) -> List[Document]:
     """
     Loads and parses a PDF file using LlamaParse.
 
@@ -112,8 +112,11 @@ async def pdf_data_loader(filepaths: List[str], num_workers=None) -> List[Docume
     Returns:
     - str: The parsed document(s) in the specified result type.
     """
-    for file_path in filepaths:
-        _, file_extension = os.path.splitext(file_path)
+    filepaths = []
+    for file_name in os.listdir(filedir):
+        _, file_extension = os.path.splitext(file_name)
+        file_path = Path(os.path.join(filedir, file_name))
+        filepaths.append(str(file_path))
         if file_extension != ".pdf":
             raise ValueError("File must be a PDF file")
 
