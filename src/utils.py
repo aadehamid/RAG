@@ -27,7 +27,7 @@ from llama_index.core import (
     Document,
     StorageContext,
     VectorStoreIndex,
-    Settings, SQLDatabase, )
+    Settings, SQLDatabase, SummaryIndex,)
 from llama_index.core.node_parser import (
     SentenceWindowNodeParser,
     SentenceSplitter,
@@ -328,7 +328,7 @@ def get_index(vector_db_path, collection_name, nodes=None, nodes_object=None):
         chroma_collection = db.get_or_create_collection(collection_name)
         vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
-        index = VectorStoreIndex(
+        vec_index = VectorStoreIndex(
             nodes=nodes,
             storage_context=storage_context,
             embed_model=embed_model,
@@ -341,19 +341,21 @@ def get_index(vector_db_path, collection_name, nodes=None, nodes_object=None):
             ],
             show_progress=True,
         )
+
     else:
         # This block now correctly handles the case where the
         # collection already exists
         print("loading index", collection_name)
         chroma_collection = db.get_collection(collection_name)
         vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-        index = VectorStoreIndex.from_vector_store(
+        vec_index = VectorStoreIndex.from_vector_store(
             vector_store,
             embed_model=embed_model,
             show_progress=True,
         )
 
-    return index
+
+    return vec_index
 
 
 # =============================================================================
