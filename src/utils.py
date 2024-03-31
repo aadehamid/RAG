@@ -27,7 +27,7 @@ from llama_index.core import (
     Document,
     StorageContext,
     VectorStoreIndex,
-    Settings, SQLDatabase, SummaryIndex,)
+    Settings, SQLDatabase, SummaryIndex, )
 from llama_index.core.node_parser import (
     SentenceWindowNodeParser,
     SentenceSplitter,
@@ -97,7 +97,8 @@ def display_prompt_dict(prompts_dict):
 
 # =============================================================================
 # Load data
-async def pdf_data_loader(filedir: Path, num_workers=None) -> List[Document]:
+async def pdf_data_loader(filedir: Path, docs_path: Path,
+                          filename: str, num_workers=None) -> List[Document]:
     """
     Loads and parses a PDF file using LlamaParse.
 
@@ -131,6 +132,11 @@ async def pdf_data_loader(filedir: Path, num_workers=None) -> List[Document]:
     # file_extractor = {".pdf": parser}
     # docs = SimpleDirectoryReader(
     #     filepath, file_extractor=file_extractor).load_data()
+
+    if docs_path is not None and filename is not None:
+        save_docs_file_path = Path(os.path.join(docs_path, filename))
+        with open(save_docs_file_path, "wb") as file:
+            pickle.dump(docs, file)
 
     return docs
 
@@ -237,12 +243,23 @@ def load_data_to_sql_db(filepath: str, dbpath: str, tablename: str) -> DataFrame
 # %%
 # =============================================================================
 # Get Nodes
+
+def concat_node_object(node, node_object):
+    if node_object is None:
+        result = node
+    elif isinstance(node_object, list):
+        result = node + node_object
+    else:
+        raise ValueError("my_variable must be either None or a list")
+    return result
+
+
 def get_nodes(
-    docs: List[Document],
-    node_save_path: Optional[Union[str, Path]] = None,
-    is_markdown: bool = False,
-    num_workers: int = 8,
-    base: bool = False,
+        docs: List[Document],
+        node_save_path: Optional[Union[str, Path]] = None,
+        is_markdown: bool = False,
+        num_workers: int = 8,
+        base: bool = False,
 ) -> Tuple[List[BaseNode], Optional[List[IndexNode]]]:
     """
     Extracts nodes from documents using either a SentenceWindowNodeParser or a base text splitter.
@@ -284,28 +301,18 @@ def get_nodes(
             nodes, nodes_object = node_parser.get_nodes_and_objects(nodes)
         else:
             nodes_object = None
+    nodes = concat_node_object(nodes, nodes_object)
+    with open(node_save_path, "wb") as file:
+        pickle.dump(nodes, file)
 
-    # if node_save_path:
-    #     with open(node_save_path, "wb") as file:
-    #         pickle.dump(nodes, file)
-
-    return nodes, nodes_object
-
-
-def concat_node_object(node, node_object):
-    if node_object is None:
-        result = node
-    elif isinstance(node_object, list):
-        result = node + node_object
-    else:
-        raise ValueError("my_variable must be either None or a list")
-    return result
+    # return nodes, nodes_object
+    return nodes
 
 
 # =============================================================================
 # %%
 # Get Index
-def get_index(vector_db_path, collection_name, nodes=None, nodes_object=None):
+def get_index(vector_db_path, collection_name, nodes=None):
     db = chromadb.PersistentClient(path=vector_db_path)
     textsplitter = TokenTextSplitter(separator=" ", chunk_size=512, chunk_overlap=128)
     title_extractor = TitleExtractor(nodes=5, llm=llm)
@@ -318,10 +325,10 @@ def get_index(vector_db_path, collection_name, nodes=None, nodes_object=None):
         device="cpu",  # set to "cuda" if you have a GPU
     )
     # Concatenate the list and the variable
-    if nodes_object is None:
-        nodes = nodes
-    elif isinstance(nodes_object, list):
-        nodes = nodes + nodes_object,
+    # if nodes_object is None:
+    #     nodes = nodes
+    # elif isinstance(nodes_object, list):
+    #     nodes = nodes + nodes_object
     # Check if the collection does not exist
     if collection_name not in [col.name for col in db.list_collections()]:
         print("building index", collection_name)
@@ -353,7 +360,6 @@ def get_index(vector_db_path, collection_name, nodes=None, nodes_object=None):
             embed_model=embed_model,
             show_progress=True,
         )
-
 
     return vec_index
 
