@@ -46,6 +46,7 @@ from llama_index.core.extractors import (
     KeywordExtractor,
 )
 from llama_index.extractors.entity import EntityExtractor
+from llama_index.llms.anthropic import Anthropic
 
 import openai
 
@@ -56,11 +57,15 @@ load_dotenv(find_dotenv())
 # %%
 model_name = "gpt-3.5-turbo"
 embedding_model_name = "text-embedding-3-small"
-llm = OpenAI(temperature=0.1, model=model_name, max_tokens=512)
+# llm = OpenAI(temperature=0.1, model=model_name, max_tokens=512)
+# llm = Anthropic(model="claude-3-opus-20240229", max_tokens=512, temperature=0.0)
+llm = Anthropic(model="claude-3-haiku-20240307", max_tokens=512, temperature=0.0)
 embed_model = OpenAIEmbedding(model=embedding_model_name)
 reranker_model = "mixedbread-ai/mxbai-rerank-base-v1"
 Settings.llm = llm
 Settings.embed_model = embed_model
+Settings.chunk_size = 512
+Settings.RerankerModel = reranker_model
 
 # base node parser is a sentence splitter
 text_splitter = SentenceSplitter()
