@@ -260,7 +260,7 @@ def get_nodes(
         is_markdown: bool = False,
         num_workers: int = 8,
         base: bool = False,
-) -> Tuple[List[BaseNode], Optional[List[IndexNode]]]:
+) ->List[BaseNode]:
     """
     Extracts nodes from documents using either a SentenceWindowNodeParser or a base text splitter.
 
@@ -335,6 +335,7 @@ def get_index(vector_db_path, collection_name, nodes=None):
         chroma_collection = db.get_or_create_collection(collection_name)
         vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
+
         vec_index = VectorStoreIndex(
             nodes=nodes,
             storage_context=storage_context,
@@ -348,7 +349,6 @@ def get_index(vector_db_path, collection_name, nodes=None):
             ],
             show_progress=True,
         )
-
     else:
         # This block now correctly handles the case where the
         # collection already exists
