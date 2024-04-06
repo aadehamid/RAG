@@ -61,9 +61,8 @@ h11==0.14.0
 httpcore==1.0.5
 httptools==0.6.1
 httpx==0.27.0
-huggingface-hub==0.22.1
+huggingface-hub==0.22.2
 humanfriendly==10.0
-icecream==2.1.3
 idna==3.6
 importlib-metadata==6.11.0
 importlib_resources==6.4.0
@@ -204,6 +203,7 @@ scipy==1.12.0
 Send2Trash==1.8.2
 sentence-transformers==2.6.1
 seqeval==1.2.2
+shellingham==1.5.4
 six==1.16.0
 smart-open==6.4.0
 sniffio==1.3.1
@@ -231,6 +231,8 @@ tqdm==4.66.2
 traitlets==5.14.2
 transformers==4.39.2
 typer==0.9.4
+typer-cli==0.12.0
+typer-slim==0.12.0
 types-python-dateutil==2.9.0.20240316
 typing-inspect==0.9.0
 typing_extensions==4.10.0
