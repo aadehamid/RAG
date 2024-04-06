@@ -55,11 +55,13 @@ load_dotenv(find_dotenv())
 # =============================================================================
 # create
 # %%
-model_name = "gpt-3.5-turbo"
+# model_name = "gpt-3.5-turbo"
+model_name = "claude-3-haiku-20240307"
+# model_name="claude-3-opus-20240229"
 embedding_model_name = "text-embedding-3-small"
-llm = OpenAI(temperature=0.1, model=model_name, max_tokens=512)
+# llm = OpenAI(temperature=0.1, model=model_name, max_tokens=512)
 # llm = Anthropic(model="claude-3-opus-20240229", max_tokens=512, temperature=0.0)
-# llm = Anthropic(model="claude-3-haiku-20240307", max_tokens=512, temperature=0.0,)
+llm = Anthropic(model= model_name, max_tokens=512, temperature=0.0,)
 embed_model = OpenAIEmbedding(model=embedding_model_name)
 reranker_model = "mixedbread-ai/mxbai-rerank-base-v1"
 Settings.llm = llm
@@ -98,7 +100,7 @@ def display_prompt_dict(prompts_dict):
 # =============================================================================
 # Load data
 async def pdf_data_loader(filedir: Path, docs_path: Path,
-                          filename: str, num_workers=None) -> List[Document]:
+                          filename: str, parsing_instruction: str = None, num_workers=None) -> List[Document]:
     """
     Loads and parses a PDF file using LlamaParse.
 
@@ -124,6 +126,7 @@ async def pdf_data_loader(filedir: Path, docs_path: Path,
     parser = LlamaParse(
         api_key=os.getenv("LLAMA_PARSER_API_KEY"),
         result_type="markdown",
+        parsing_instruction=parsing_instruction,
         language="en",
         num_workers=num_workers,
         verbose=True,
@@ -286,6 +289,9 @@ def get_nodes(
     else:
         if is_markdown:
             node_parser = MarkdownElementNodeParser(num_workers=num_workers)
+            # Extract nodes using the selected node parser
+            nodes = node_parser.get_nodes_from_documents(docs)
+            nodes, nodes_object = node_parser.get_nodes_and_objects(nodes)
         else:
             # Initialize the SentenceWindowNodeParser with default settings
             node_parser = SentenceWindowNodeParser.from_defaults(
@@ -293,14 +299,14 @@ def get_nodes(
                 window_metadata_key="window",  # Metadata key for window information
                 original_text_metadata_key="original_text",  # Metadata key for original text information
             )
-
-        # Extract nodes using the selected node parser
-        nodes = node_parser.get_nodes_from_documents(docs)
-
-        if is_markdown:
-            nodes, nodes_object = node_parser.get_nodes_and_objects(nodes)
-        else:
+            # Extract nodes using the selected node parser
+            nodes = node_parser.get_nodes_from_documents(docs)
             nodes_object = None
+
+        # if is_markdown:
+        #     nodes, nodes_object = node_parser.get_nodes_and_objects(nodes)
+        # else:
+        #     nodes_object = None
     nodes = concat_node_object(nodes, nodes_object)
     with open(node_save_path, "wb") as file:
         pickle.dump(nodes, file)
