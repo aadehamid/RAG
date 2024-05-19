@@ -1,10 +1,14 @@
 import os
 import pickle
 import re
+import asyncio
 import sqlite3
 from pathlib import Path
 from typing import List, Tuple, Optional, Any, Union
 import pandas as pd
+import pickle
+from sqlalchemy import create_engine
+import sqlite3
 import chromadb
 from IPython.core.display_functions import display
 from llama_index.core.indices.struct_store import NLSQLTableQueryEngine, SQLTableRetrieverQueryEngine
@@ -13,6 +17,7 @@ from llama_index.core.postprocessor import (
     MetadataReplacementPostProcessor,
     SentenceTransformerRerank, LongContextReorder,
 )
+from llama_index.core import SummaryIndex
 from llama_index.core.query_engine import SubQuestionQueryEngine, RouterQueryEngine
 from llama_index.core.selectors import LLMSingleSelector
 from llama_index.core.tools import QueryEngineTool, ToolMetadata
@@ -52,6 +57,39 @@ import openai
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 load_dotenv(find_dotenv())
+#=============================================================================
+# File Paths
+# File Paths
+# File Paths
+current_path = Path.cwd()
+pdf_dirs = current_path.parent / "data" / "pdfs"
+# pdf_dirs  = Path("/Users/hamidadesokan/Dropbox/2_Skill_Development/DLML/genai_applications/RAG/data/pdfs")
+docs_path = current_path.parent / "data" / "llamadocs"
+# docs_path = Path("/Users/hamidadesokan/Dropbox/2_Skill_Development/DLML/genai_applications/RAG/data/llamadocs")
+chroma_path = current_path.parent / "data" / "chromadb"
+# chroma_path = Path("/Users/hamidadesokan/Dropbox/2_Skill_Development/DLML/genai_applications/RAG/data/chromadb")
+sqlitepath = current_path.parent / "data" / "sqlite" / "sqlite.db"
+# sqlitepath = Path("/Users/hamidadesokan/Dropbox/2_Skill_Development/DLML/genai_applications/RAG/data/sqlite/sqlite.db")
+# Tesla Data
+nodes_path = current_path.parent / "data" / "nodes" / "tesla_esg_nodes.pkl"
+# nodes_path = Path("/Users/hamidadesokan/Dropbox/2_Skill_Development/DLML/genai_applications/RAG/data/nodes/tesla_esg_nodes.pkl")
+
+
+# Sales Data
+sales_data_path = current_path.parent / "data" / "csv" / "kaggle_sample_superstore.csv"
+# sales_data_path = Path("/Users/hamidadesokan/Dropbox/2_Skill_Development/DLML/genai_applications/RAG/data/csv/kaggle_sample_superstore.csv")
+sales_nodes_path = current_path.parent / "data" / "nodes" / "sales_nodes.pkl"
+# sales_nodes_path = Path("/Users/hamidadesokan/Dropbox/2_Skill_Development/DLML/genai_applications/RAG/data/nodes/sales_nodes.pkl")
+
+
+parsing_instruction = """
+The pdf documents are annual sustainability reports of companies. 
+Always quantify your answer using the numbers cited in the relevant text in the document.
+Parse every number embedded in the text in a format that is the easiest to use for calculations or retrieval.
+Parse the numbers that indicates sustainiability metrics for that year as a list of sustainability metrics with relevanat text and numbers. 
+"""
+
+#=============================================================================
 # =============================================================================
 # create
 # %%
@@ -523,3 +561,70 @@ def text_to_query_engine(all_table_names: List[str], engine: Engine,
     # Return the initialized query engine
     # return query_engine, sql_database
     return query_engine
+#=============================================================================
+# Run the final function
+fulldocpath = Path.joinpath(docs_path, "10K_esg")
+fulllnodespath = Path.joinpath(nodes_path)
+
+
+def final_query(fulldocpath: Path, fulllnodespath: Path, tablename: str = "Sales"):
+    if fulldocpath.exists():
+        print(f"The path {fulldocpath} exists. Loading from disk...")
+        with open(fulldocpath, "rb") as f:
+            esg_docs = pickle.load(f)
+    else:
+        print(f"The path {fulldocpath} does not exist. Creating a new one...")
+        esg_docs = asyncio.run(pdf_data_loader(pdf_dirs, docs_path, fulldocpath.name, parsing_instruction, 3))
+
+    if fulllnodespath.exists():
+        print(f"The path {fulllnodespath} exists. Loading from disk...")
+        with open(fulllnodespath, "rb") as f:
+            esg_nodes = pickle.load(f)
+    else:
+        print(f"The path {fulllnodespath} does not exist. Creating a new one...")
+        esg_nodes = get_nodes(esg_docs, nodes_path, is_markdown=True,
+                              num_workers=6)
+    # Create index
+    esg_index = get_index(str(chroma_path), fulldocpath.name, esg_nodes)
+    summary_esg_index = SummaryIndex(esg_nodes)
+
+    # Create query engine
+    esg_query_engine = get_sentence_window_query_engine(esg_index, similarity_top_k=6,
+                                                        rerank_top_n=3)
+
+    summary_esg_query_engine = summary_esg_index.as_query_engine(
+        response_mode="tree_summarize",
+        use_async=True, )
+
+    df = load_data_to_sql_db(str(sales_data_path), str(sqlitepath), tablename)
+    conn = sqlite3.connect(str(sqlitepath))
+    engine = create_engine("sqlite:///" + str(sqlitepath))
+    sales_sql_query_engine = text_to_query_engine([tablename], engine)
+
+    llm = Anthropic(model="claude-3-opus-20240229")
+    # llm = OpenAI(temperature=0.1, model= "gpt-3.5-turbo")
+    esg_tool = QueryEngineTool(
+        query_engine=esg_query_engine,
+        metadata=ToolMetadata(
+            name="Tesla10K_Esg_Report_Query_Engine",
+            description="Tool to query McKinsey and Deloitte annual sustainability report. And Teslas 2022 10K financial statement"))
+    sql_tool = QueryEngineTool(
+        query_engine=sales_sql_query_engine,
+        metadata=ToolMetadata(
+            name="SQl engine to query the sqlite sales database",
+            description="Useful for translating a natural language query into a SQL query over"
+                        " a table containing: product information"))
+    summary_esg_tool = QueryEngineTool(
+        query_engine=summary_esg_query_engine,
+        metadata=ToolMetadata(
+            name="Summary ESG Engine",
+            description="Useful for summarizing the ESG report"))
+    query_engine_tools = [
+        esg_tool,
+        summary_esg_tool,
+        sql_tool]
+
+    ## SUB QUERY
+    sq_vec_summary_engine = SubQuestionQueryEngine.from_defaults(
+        query_engine_tools=query_engine_tools)
+    return sq_vec_summary_engine

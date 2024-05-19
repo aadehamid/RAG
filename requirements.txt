@@ -101,7 +101,7 @@ llama-index-extractors-entity==0.1.2
 llama-index-indices-managed-llama-cloud==0.1.6
 llama-index-legacy==0.9.48
 llama-index-llms-anthropic==0.1.11
-llama-index-llms-openai==0.1.13
+llama-index-llms-openai==0.1.15
 llama-index-multi-modal-llms-openai==0.1.4
 llama-index-postprocessor-longllmlingua==0.1.2
 llama-index-program-openai==0.1.5
