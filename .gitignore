@@ -5,6 +5,7 @@ data/csv/Work_Order_Consilidated.xlsx
 llamadocs/
 nodes/
 .env
+.envrc
 .DS_Store
 data/pdfs/
 .venv/
