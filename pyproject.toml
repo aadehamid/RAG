@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "rag"
+version = "0.1.0"
+description = ""
+authors = ["Hamid Adesokan <aadehamid@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+Byaldi = "^0.0.2.post2"
+claudette = "^0.0.9"
+poppler-utils = "^0.1.0"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.6.4"
+rich = "^13.8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
