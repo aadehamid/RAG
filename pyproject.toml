@@ -10,10 +10,14 @@ python = "^3.12"
 Byaldi = "^0.0.2.post2"
 claudette = "^0.0.9"
 poppler-utils = "^0.1.0"
+ipykernel = "^6.29.5"
+ipywidgets = "^8.1.5"
+python-dotenv = "^1.0.1"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.6.4"
 rich = "^13.8.0"
+ipykernel = "^6.29.5"
 
 [build-system]
 requires = ["poetry-core"]
